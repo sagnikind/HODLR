@@ -3,7 +3,8 @@ foreach(TARGET
         example_lowrank_factorization
         example
         example_RPY 
-        example_matern 
+        example_matern
+        example_matern_ng	
         example_conducting_sphere_plate
        )
 

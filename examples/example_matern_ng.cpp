@@ -1,5 +1,6 @@
 #include "HODLR_Matrix.hpp"
 #include "HODLR.hpp"
+#include <math.h>
 //#include <gsl/gsl_sf_bessel.h>
 //#include <gsl/gsl_errno.h>
 //#include <gsl/gsl_fft_complex.h>
@@ -195,7 +196,7 @@ class Kernel : public HODLR_Matrix
 		~Kernel() {};
 };
 
-void core_g_to_ng (double *Z, double *localtheta, int m) {
+void core_g_to_ng (Vec Z, double *localtheta, int m) {
 
 	//localtheta[2] ---> \xi (location)
 	//localtheta[3] ---> \omega (scale)
@@ -217,22 +218,21 @@ void core_g_to_ng (double *Z, double *localtheta, int m) {
 	if(g == 0)
 	{
 		for(i = 0; i < m; i++)
-			Z[i] = xi + omega *  Z[i] * (exp(0.5 * h * pow(Z[i], 2)));
+			Z(i) = xi + omega *  Z(i) * (exp(0.5 * h * pow(Z(i), 2)));
 	}
 	else
 	{
 		for(i = 0; i < m; i++)
-			Z[i] = xi + omega * (exp(g * Z[i]) - 1) * (exp(0.5 * h * pow(Z[i], 2))) / g;
+			Z(i) = xi + omega * (exp(g * Z(i)) - 1) * (exp(0.5 * h * pow(Z(i), 2))) / g;
 	}
-
 }
 
-double Tukey_gh(double *theta, int N)
+Vec Tukey_gh(double *theta, int N)
         //! Generate from Tukey_gh 
 {
 	int i;
         Vec z;
-	double PI = 3.14;
+	double PI = 3.141592653589793238;
 	for(i=0;i<N;i++)
 	{
 		z(i) = sqrt(-2*log(uniform_distribution(0,1))) * cos(2*PI*uniform_distribution(0,1));
@@ -242,20 +242,15 @@ double Tukey_gh(double *theta, int N)
 	
 	Mat B = K->getMatrix(0, 0, N, N);
         
-	Eigen::LLT<Mat> llt; 
+	Eigen::LLT<Mat> llt;
+        llt.compute(B);	
 	Mat L = llt.matrixL();
 	
 	z = L * z ;
 
-	double *z_0[N];
-	for(i=0;i<N;i++)
-	{	
-		*z_0[i] = z(i);
-	}
-
-	//core_g_to_ng(z_0,theta,N);
+	core_g_to_ng(z,theta,N);
 	
-	//return z_0;
+	return z;
 } 
 
 static double f(double z_non, double z, double xi, double omega, double g, double h)
@@ -295,7 +290,7 @@ double newton_raphson(double z, double xi, double omega, double g, double h, dou
 	return x1;
 }
 
-void core_ng_transform (double *Z, double *nan_flag, double *localtheta, int m) {
+void core_ng_transform (Vec Z, double *nan_flag, double *localtheta, int m) {
 
 	//localtheta[2] ---> \xi (location)
 	//localtheta[3] ---> \omega (scale)
@@ -309,10 +304,10 @@ void core_ng_transform (double *Z, double *nan_flag, double *localtheta, int m) 
 	double eps = 1.0e-5;
 	int i=0;
 	for(i = 0; i < m; i++)
-		Z[i] =  newton_raphson(Z[i], xi, omega, g, h, eps);
+		Z(i) =  newton_raphson(Z(i), xi, omega, g, h, eps);
 }
 
-double core_ng_loglike (double *Z, double *localtheta, int m) {
+double core_ng_loglike (Vec Z, double *localtheta, int m) {
 
     //localtheta[2] ---> \xi (location)
     //localtheta[3] ---> \omega (scale)
@@ -334,43 +329,54 @@ double core_ng_loglike (double *Z, double *localtheta, int m) {
     for(i = 0; i < m; i++)
     {
         if(g == 0)
-            sum += log(1 + h * pow(Z[i], 2)) + 0.5 * h * pow(Z[i], 2);
+            sum += log(1 + h * pow(Z(i), 2)) + 0.5 * h * pow(Z(i), 2);
         else
         {
-            sum += log(exp(g * Z[i]) + (exp(g * Z[i])-1) * h * Z[i]/g ) + 0.5 * h * pow(Z[i],2);
+            sum += log(exp(g * Z(i)) + (exp(g * Z(i))-1) * h * Z(i)/g ) + 0.5 * h * pow(Z(i),2);
             //printf("g:%f, h:%f, Z[i]:%f,", g, h, Z[i]);
         }
     }
     return(sum);
 }
 
-double MLE_ng_dense(double *z, int N, double *theta)
+double MLE_ng_dense(Vec z, int N, double *theta)
 {	
 	int i;
-	double PI = 3.14;
+	double PI = 3.141592653589793238;
+	double FLT_MAX = pow(10,7);
 	double *nan_flag = 0;
 
 	Kernel* K            = new Kernel(N, theta[0], theta[1], 0);
 	
 	core_ng_transform(z,nan_flag ,theta,N);
+	for (i=0;i<N;i++)
+	    if(isnan(z(i)))
+		    *nan_flag = 1;
+	if(*nan_flag == 1)
+	{
+		return -FLT_MAX;	
+	}
+	else
+	{	
+		Mat B = K->getMatrix(0, 0, N, N);
 
-	Vec z_0;
-        for(i=0;i<N;i++)
-        {
-                z_0(i) = z[i];
-        }
+        	Eigen::LLT<Mat> llt;
+        	Vec x = B.llt().solve(z);
 
-        Mat B = K->getMatrix(0, 0, N, N);
-	
-	Eigen::LLT<Mat> llt;
-	Vec x = B.llt().solve(z_0);
-	
-	double dotp = z_0.adjoint()*x;
-	double log_det = log(B.determinant());
-	double loglik = -0.5 * dotp -  0.5*log_det ;
-        loglik = loglik - core_ng_loglike (z, theta, N) - N * log(theta[3]) - (double) (N / 2.0) * log(2.0 * PI);
-        return loglik;
+        	double dotp = z.adjoint()*x;
 
+    		llt.compute(B);
+    		dtype log_det = 0.0;
+   	 	for(int i = 0; i < llt.matrixL().rows(); i++)
+    		{
+        		log_det += log(llt.matrixL()(i,i));
+    		}
+    		log_det *= 2;
+        	
+        	double loglik = -0.5 * dotp -  0.5*log_det ;
+        	loglik = loglik - core_ng_loglike (z, theta, N) - N * log(theta[3]) - (double) (N / 2.0) * log(2.0 * PI);
+        	return loglik;
+	}
 }
 
 /*double MLE_ng_HODLLR(double *z,int n, double *theta, int N, int M, int tol)
@@ -395,7 +401,48 @@ double MLE_ng_dense(double *z, int N, double *theta)
 	return loglik;
 }*/
 
-int main(int argc, char* argv[]) 
+int main(int argc, char* argv[])
+{	
+	double *theta=(double *) malloc(6 * sizeof(double)) ;
+        theta[0] = 0.1;
+        theta[1] = 0.5;
+        theta[2] = 0;
+        theta[3] = 1;
+        theta[4] = 0.2;
+        theta[5] = 0.2;
+	double *initial_theta=(double *) malloc(6 * sizeof(double)) ;
+	int N;
+	
+	Vec Z = Tukey_gh(theta, N);
+
+	if(argc < 8)
+        {
+                std::cout << "All arguments weren't passed to executable!" << std::endl;
+                std::cout << "Using Default Arguments:" << std::endl;
+                initial_theta[0] = 0.1;
+        	initial_theta[1] = 0.5;
+        	initial_theta[2] = 0;
+        	initial_theta[3] = 1;
+        	initial_theta[4] = 0.1;
+        	initial_theta[5] = 0.1;
+        	int N = 1600;
+        }
+	
+	else
+	{
+		initial_theta[0] = atof(argv[1]);
+        	initial_theta[1] = atof(argv[2]);
+        	initial_theta[2] = atof(argv[3]);
+        	initial_theta[3] = atof(argv[4]);
+        	initial_theta[4] = atof(argv[5]);
+        	initial_theta[5] = atof(argv[6]);
+        	int N = atoi(argv[7]);
+	}
+
+	MLE_ng_dense(Z, N, initial_theta);
+}
+
+/*int main(int argc, char* argv[]) 
 {
 	int N, M;
 	double tolerance;
@@ -519,4 +566,4 @@ int main(int argc, char* argv[])
 	delete T;
 
 	return 0;
-}
+}*/

@@ -127,9 +127,9 @@ int main(int argc, char* argv[])
 
     // These are mainly used in development and debugging:
     // Used to visualize the rank structure of the considered kernel:
-    // T->plotTree("plot.svg");
+     T->plotTree("plot.svg");
     // Prints the details of all the nodes in the tree:
-    // T->printTreeDetails();
+     T->printTreeDetails();
 
     // Random Matrix to multiply with
     Mat x = (Mat::Random(N, 1)).real();
