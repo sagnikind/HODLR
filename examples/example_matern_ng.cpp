@@ -1,6 +1,7 @@
 #include "HODLR_Matrix.hpp"
 #include "HODLR.hpp"
 #include <math.h>
+#include <sys/stat.h>
 //#include <gsl/gsl_sf_bessel.h>
 //#include <gsl/gsl_errno.h>
 //#include <gsl/gsl_fft_complex.h>
@@ -156,24 +157,86 @@ location* GenerateXYLoc(int n, int seed)
 	return locations;
 }
 
+bool is_file_exist(const char *fileName)
+{
+    std::ifstream infile(fileName);
+    return infile.good();
+}
+
+void write_vectors(double * zvec, location * locations, int n)
+    //! store locations, measurements, and log files if log=1
+    /*!
+     * Returns initial_theta, starting_theta, target_theta.
+     * @param[in] zvec: measurements vector.
+     * @param[in] data: MLE_data struct with different MLE inputs.
+     * @param[in] n: number of spatial locations
+     * */
+{
+
+    int i = 1;
+    FILE *pFileZ, *pFileXY;
+    location *l = locations;
+    struct stat st = {0};
+    char * nFileZ  = (char *) malloc(50 * sizeof(char));
+    char * temp    = (char *) malloc(50 * sizeof(char));
+    char * nFileXY = (char *) malloc(50 * sizeof(char));
+    char * nFileLog = (char *) malloc(50 * sizeof(char));
+    //Create New directory if not exist
+    if (stat("./synthetic_ds", &st) == -1)
+        mkdir("./synthetic_ds", 0700);
+
+    snprintf(nFileZ, 50, "%s%d%s", "./synthetic_ds/Z_", n,"_");
+    snprintf(nFileXY, 50, "%s%d%s", "./synthetic_ds/LOC_", n,"_");
+    snprintf(nFileLog, 50, "%s%d%s", "./synthetic_ds/log_", n,"_");
+
+    snprintf(temp, 50, "%s%d", nFileLog , i);
+    while(is_file_exist(temp) == 1)
+    {
+        i++;
+        snprintf(temp, 50, "%s%d", nFileLog , i);
+    }
+
+    sprintf(temp, "%d", i);
+    strcat(nFileZ, temp);
+    strcat(nFileXY, temp);
+    strcat(nFileLog, temp);
+
+
+    pFileZ = fopen(nFileZ, "w+");
+    pFileXY = fopen(nFileXY, "w+");
+
+
+    for(i=0;i<n;i++){
+        fprintf(pFileZ, "%0.12f\n", zvec[i]);
+        //if(l->z ==NULL)
+            fprintf(pFileXY, "%0.12f,%0.12f\n", l->x[i], l->y[i]);
+        //else
+          //  fprintf(pFileXY, "%f,%f,%f\n", l->x[i], l->y[i], l->z[i]);
+    }
+
+    fclose(pFileZ);
+    fclose(pFileXY);
+}
+
 class Kernel : public HODLR_Matrix 
 {
 	private:
-		location* x;
+		location* l;
 		double phi, nu;
 
 	public:
 
 		// Constructor:
 		Kernel(int N, double phi, double nu, int seed) : HODLR_Matrix(N) 
-	{
-		x =  GenerateXYLoc( N,  seed);
+	{       
+		seed = 14;//remove after testing
+		l =  GenerateXYLoc( N,  seed);
 
 		this->phi = phi;
 		this->nu  = nu;
 		// This is being sorted to ensure that we get
 		// optimal low rank structure:
-		zsort_locations(N, x);
+		zsort_locations(N, l);
 	};
 
 		dtype getMatrixEntry(int i, int j) 
@@ -181,7 +244,7 @@ class Kernel : public HODLR_Matrix
 			double con = 0.0;
 			double dist = 0.0;
 			//dist = 4 * sqrt(2*nu) * sqrt(pow((x->x[i] - x->x[j]), 2) + pow((x->y[i] - x->y[j]), 2))/phi;
-			dist = 4  * sqrt(pow((x->x[i] - x->x[j]), 2) + pow((x->y[i] - x->y[j]), 2))/phi;
+			dist = sqrt(pow((l->x[i] - l->x[j]), 2) + pow((l->y[i] - l->y[j]), 2))/phi;
 
 			//con = pow(2,(nu-1)) * tgamma(nu);
 			//con = 1.0/con;
@@ -196,7 +259,7 @@ class Kernel : public HODLR_Matrix
 		~Kernel() {};
 };
 
-void core_g_to_ng (Vec Z, double *localtheta, int m) {
+void core_g_to_ng (double *Z, double *localtheta, int m) {
 
 	//localtheta[2] ---> \xi (location)
 	//localtheta[3] ---> \omega (scale)
@@ -218,39 +281,61 @@ void core_g_to_ng (Vec Z, double *localtheta, int m) {
 	if(g == 0)
 	{
 		for(i = 0; i < m; i++)
-			Z(i) = xi + omega *  Z(i) * (exp(0.5 * h * pow(Z(i), 2)));
+			Z[i] = xi + omega *  Z[i] * (exp(0.5 * h * pow(Z[i], 2)));
 	}
 	else
 	{
 		for(i = 0; i < m; i++)
-			Z(i) = xi + omega * (exp(g * Z(i)) - 1) * (exp(0.5 * h * pow(Z(i), 2))) / g;
+			Z[i] = xi + omega * (exp(g * Z[i]) - 1) * (exp(0.5 * h * pow(Z[i], 2))) / g;
 	}
 }
 
-Vec Tukey_gh(double *theta, int N)
+double *Tukey_gh(double *theta, int N)
         //! Generate from Tukey_gh 
 {
 	int i;
-        Vec z;
 	double PI = 3.141592653589793238;
+	double *z_0=(double *) malloc(N * sizeof(double)) ;
+
+	Eigen::VectorXd z(N);
+
+	//std::cout << "N=   " << N << std::endl;
+
 	for(i=0;i<N;i++)
-	{
-		z(i) = sqrt(-2*log(uniform_distribution(0,1))) * cos(2*PI*uniform_distribution(0,1));
+	{	
+		z[i] = sqrt(-2*log(uniform_distribution(0,1))) * cos(2*PI*uniform_distribution(0,1));
 	}
+	
 
 	Kernel* K            = new Kernel(N, theta[0], theta[1], 0);
 	
 	Mat B = K->getMatrix(0, 0, N, N);
-        
+	//std::cout << "Covariance matrix:\n" << B << std::endl;
+
+	//std::cout << "independent normal:\n" << z << std::endl;
+
 	Eigen::LLT<Mat> llt;
         llt.compute(B);	
 	Mat L = llt.matrixL();
-	
+	//std::cout << "L Covariance matrix:\n" << L << std::endl;
 	z = L * z ;
 
-	core_g_to_ng(z,theta,N);
+	//std::cout << "Normal obs:\n" << z << std::endl;
+
+	for(i=0;i<N;i++)
+	{
+		z_0[i] = z[i];
+	}
+
+	core_g_to_ng(z_0,theta,N);
 	
-	return z;
+	for(i=0;i<N;i++)
+	{
+		z[i] = z_0[i];
+	}	
+
+	//std::cout << "TGH obs:\n" << z << std::endl;
+	return z_0;
 } 
 
 static double f(double z_non, double z, double xi, double omega, double g, double h)
@@ -290,7 +375,7 @@ double newton_raphson(double z, double xi, double omega, double g, double h, dou
 	return x1;
 }
 
-void core_ng_transform (Vec Z, double *nan_flag, double *localtheta, int m) {
+void core_ng_transform (double *Z, double *localtheta, int m) {
 
 	//localtheta[2] ---> \xi (location)
 	//localtheta[3] ---> \omega (scale)
@@ -304,10 +389,19 @@ void core_ng_transform (Vec Z, double *nan_flag, double *localtheta, int m) {
 	double eps = 1.0e-5;
 	int i=0;
 	for(i = 0; i < m; i++)
-		Z(i) =  newton_raphson(Z(i), xi, omega, g, h, eps);
+		Z[i] =  newton_raphson(Z[i], xi, omega, g, h, eps);
+	
+	Eigen::VectorXd z(m);
+
+	for(i=0;i<m;i++)
+        {
+                z[i] = Z[i];
+        }
+
+        std::cout << "After transformation:\n" << z << std::endl;
 }
 
-double core_ng_loglike (Vec Z, double *localtheta, int m) {
+double core_ng_loglike (double *Z, double *localtheta, int m) {
 
     //localtheta[2] ---> \xi (location)
     //localtheta[3] ---> \omega (scale)
@@ -329,35 +423,43 @@ double core_ng_loglike (Vec Z, double *localtheta, int m) {
     for(i = 0; i < m; i++)
     {
         if(g == 0)
-            sum += log(1 + h * pow(Z(i), 2)) + 0.5 * h * pow(Z(i), 2);
+            sum += log(1 + h * pow(Z[i], 2)) + 0.5 * h * pow(Z[i], 2);
         else
         {
-            sum += log(exp(g * Z(i)) + (exp(g * Z(i))-1) * h * Z(i)/g ) + 0.5 * h * pow(Z(i),2);
+            sum += log(exp(g * Z[i]) + (exp(g * Z[i])-1) * h * Z[i]/g ) + 0.5 * h * pow(Z[i],2);
             //printf("g:%f, h:%f, Z[i]:%f,", g, h, Z[i]);
         }
     }
     return(sum);
 }
 
-double MLE_ng_dense(Vec z, int N, double *theta)
+double MLE_ng_dense(double *z_0, int N, double *theta)
 {	
 	int i;
 	double PI = 3.141592653589793238;
 	double FLT_MAX = pow(10,7);
-	double *nan_flag = 0;
+	double nan_flag = 0;
 
 	Kernel* K            = new Kernel(N, theta[0], theta[1], 0);
-	
-	core_ng_transform(z,nan_flag ,theta,N);
+	Mat B = K->getMatrix(0, 0, N, N);
+        std::cout << "Covariance matrix:\n" << B << std::endl;
+
+	core_ng_transform(z_0,theta,N);
 	for (i=0;i<N;i++)
-	    if(isnan(z(i)))
-		    *nan_flag = 1;
-	if(*nan_flag == 1)
-	{
+	    if(isnan(z_0[i]))
+		    nan_flag = 1;
+	if(nan_flag == 1)
+	{	
+		printf("Inf case\n");
 		return -FLT_MAX;	
 	}
-	else
-	{	
+else
+	{
+		Eigen::VectorXd z(N);
+        	for(i=0;i<N;i++)
+        	{
+                	z[i] = z_0[i];
+        	}		
 		Mat B = K->getMatrix(0, 0, N, N);
 
         	Eigen::LLT<Mat> llt;
@@ -371,11 +473,16 @@ double MLE_ng_dense(Vec z, int N, double *theta)
     		{
         		log_det += log(llt.matrixL()(i,i));
     		}
-    		log_det *= 2;
-        	
+    		log_det *= 2;	
+
         	double loglik = -0.5 * dotp -  0.5*log_det ;
-        	loglik = loglik - core_ng_loglike (z, theta, N) - N * log(theta[3]) - (double) (N / 2.0) * log(2.0 * PI);
-        	return loglik;
+        	loglik = loglik - core_ng_loglike (z_0, theta, N) - N * log(theta[3]) - (double) (N / 2.0) * log(2.0 * PI);
+        	std::cout << "dotp:" << dotp << std::endl;
+		std::cout << "logdet:" << log_det << std::endl;
+		std::cout << "core_ng_loglike:" << core_ng_loglike (z_0, theta, N) << std::endl;
+		std::cout << "logtheta:" << N * log(theta[3]) << std::endl;
+		std::cout << "loglik:" << loglik << std::endl;
+		return loglik;
 	}
 }
 
@@ -401,45 +508,59 @@ double MLE_ng_dense(Vec z, int N, double *theta)
 	return loglik;
 }*/
 
-int main(int argc, char* argv[])
-{	
-	double *theta=(double *) malloc(6 * sizeof(double)) ;
-        theta[0] = 0.1;
+
+void dense_non_gaussian( int argc, char* argv[])
+{
+        double *theta=(double *) malloc(6 * sizeof(double)) ;
+        theta[0] = 7;
         theta[1] = 0.5;
-        theta[2] = 0;
+        theta[2] = 5;
         theta[3] = 1;
         theta[4] = 0.2;
         theta[5] = 0.2;
-	double *initial_theta=(double *) malloc(6 * sizeof(double)) ;
-	int N;
-	
-	Vec Z = Tukey_gh(theta, N);
+        double *initial_theta=(double *) malloc(6 * sizeof(double)) ;
+        int N;
 
-	if(argc < 8)
+        if(argc < 8)
         {
                 std::cout << "All arguments weren't passed to executable!" << std::endl;
                 std::cout << "Using Default Arguments:" << std::endl;
                 initial_theta[0] = 0.1;
-        	initial_theta[1] = 0.5;
-        	initial_theta[2] = 0;
-        	initial_theta[3] = 1;
-        	initial_theta[4] = 0.1;
-        	initial_theta[5] = 0.1;
-        	int N = 1600;
+                initial_theta[1] = 0.5;
+                initial_theta[2] = 0;
+                initial_theta[3] = 2;
+                initial_theta[4] = 0.1;
+                initial_theta[5] = 0.1;
+                N = 36;
         }
-	
-	else
-	{
-		initial_theta[0] = atof(argv[1]);
-        	initial_theta[1] = atof(argv[2]);
-        	initial_theta[2] = atof(argv[3]);
-        	initial_theta[3] = atof(argv[4]);
-        	initial_theta[4] = atof(argv[5]);
-        	initial_theta[5] = atof(argv[6]);
-        	int N = atoi(argv[7]);
-	}
 
-	MLE_ng_dense(Z, N, initial_theta);
+        else
+        {
+                initial_theta[0] = atof(argv[1]);
+                initial_theta[1] = atof(argv[2]);
+                initial_theta[2] = atof(argv[3]);
+                initial_theta[3] = atof(argv[4]);
+                initial_theta[4] = atof(argv[5]);
+                initial_theta[5] = atof(argv[6]);
+                N = atoi(argv[7]);
+        }
+
+        double *z=(double *) malloc(N * sizeof(double)) ;
+        z = Tukey_gh(theta, N);
+        location* x;
+        int seed = 14;//remove after testing
+        x =  GenerateXYLoc( N,  seed);
+        write_vectors(z,x,N);
+
+
+        MLE_ng_dense(z, N, initial_theta);
+}
+
+
+int main(int argc, char* argv[])
+{	
+	dense_non_gaussian(argc, argv);
+	//hodler_non_gaussian(argc, argv);
 }
 
 /*int main(int argc, char* argv[]) 
