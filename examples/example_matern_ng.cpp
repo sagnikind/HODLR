@@ -229,7 +229,6 @@ class Kernel : public HODLR_Matrix
 		// Constructor:
 		Kernel(int N, double phi, double nu, int seed) : HODLR_Matrix(N) 
 	{       
-		seed = 14;//remove after testing
 		l =  GenerateXYLoc( N,  seed);
 
 		this->phi = phi;
@@ -290,9 +289,10 @@ void core_g_to_ng (double *Z, double *localtheta, int m) {
 	}
 }
 
-double *Tukey_gh(double *theta, int N)
+double *Tukey_gh(double *theta, int N,int seed)
         //! Generate from Tukey_gh 
 {
+	srand(seed);
 	int i;
 	double PI = 3.141592653589793238;
 	double *z_0=(double *) malloc(N * sizeof(double)) ;
@@ -398,7 +398,7 @@ void core_ng_transform (double *Z, double *localtheta, int m) {
                 z[i] = Z[i];
         }
 
-        std::cout << "After transformation:\n" << z << std::endl;
+       // std::cout << "After transformation:\n" << z << std::endl;
 }
 
 double core_ng_loglike (double *Z, double *localtheta, int m) {
@@ -439,12 +439,16 @@ double MLE_ng_dense(double *z_0, int N, double *theta)
 	double PI = 3.141592653589793238;
 	double FLT_MAX = pow(10,7);
 	double nan_flag = 0;
-
+	double start, end;
+	
 	Kernel* K            = new Kernel(N, theta[0], theta[1], 0);
-	Mat B = K->getMatrix(0, 0, N, N);
-        std::cout << "Covariance matrix:\n" << B << std::endl;
-
+	//Mat B = K->getMatrix(0, 0, N, N);
+        //std::cout << "Covariance matrix:\n" << B << std::endl;
+	
+	start = omp_get_wtime();
 	core_ng_transform(z_0,theta,N);
+	end = omp_get_wtime();
+	std::cout << "Time for core_ng_transform in dense: " << (end - start) << std::endl;
 	for (i=0;i<N;i++)
 	    if(isnan(z_0[i]))
 		    nan_flag = 1;
@@ -453,7 +457,7 @@ double MLE_ng_dense(double *z_0, int N, double *theta)
 		printf("Inf case\n");
 		return -FLT_MAX;	
 	}
-else
+	else
 	{
 		Eigen::VectorXd z(N);
         	for(i=0;i<N;i++)
@@ -461,106 +465,246 @@ else
                 	z[i] = z_0[i];
         	}		
 		Mat B = K->getMatrix(0, 0, N, N);
-
+		
+		start = omp_get_wtime();
         	Eigen::LLT<Mat> llt;
         	Vec x = B.llt().solve(z);
 
         	double dotp = z.adjoint()*x;
-
+		end = omp_get_wtime();
+		std::cout << "Time for dotp in dense: " << (end - start) << std::endl;
+		
+		start = omp_get_wtime();
     		llt.compute(B);
     		dtype log_det = 0.0;
    	 	for(int i = 0; i < llt.matrixL().rows(); i++)
     		{
         		log_det += log(llt.matrixL()(i,i));
     		}
-    		log_det *= 2;	
+    		log_det *= 2;
+		end = omp_get_wtime();
+                std::cout << "Time for logdet in dense: " << (end - start) << std::endl;	
 
         	double loglik = -0.5 * dotp -  0.5*log_det ;
         	loglik = loglik - core_ng_loglike (z_0, theta, N) - N * log(theta[3]) - (double) (N / 2.0) * log(2.0 * PI);
-        	std::cout << "dotp:" << dotp << std::endl;
-		std::cout << "logdet:" << log_det << std::endl;
-		std::cout << "core_ng_loglike:" << core_ng_loglike (z_0, theta, N) << std::endl;
-		std::cout << "logtheta:" << N * log(theta[3]) << std::endl;
-		std::cout << "loglik:" << loglik << std::endl;
+         	// std::cout << "dotp:" << std::setprecision(16) <<dotp << std::endl;
+		// std::cout << "logdet:" << std::setprecision(16) <<log_det << std::endl;
+		// std::cout << "core_ng_loglike:" << std::setprecision(16) << core_ng_loglike (z_0, theta, N) << std::endl;
+		// std::cout << "logtheta:" <<std::setprecision(16) << N * log(theta[3]) << std::endl;
+		// std::cout << "loglik:" <<std::setprecision(16) << loglik << std::endl;
 		return loglik;
 	}
 }
 
-/*double MLE_ng_HODLLR(double *z,int n, double *theta, int N, int M, int tol)
-{
-	int i;
-	tol = pow(10, - tol);
-	Kernel* K            = new Kernel(N, theta[0], theta[1], 0);
-	HODLR* T = new HODLR(N, M, tol);
-	T->assemble(K, "rookPivoting", 1, 1);
-	core_ng_transform(z,nan_flag ,theta,N);
-	Mat x;
-        x = T->solve(z);
-	double dotp = 0;
-	for(i=0;i<n;i++)
-	{
-		dotp += x(i,0)*z[i];
-	}
-
-	dtype log_det_hodlr = T->logDeterminant();
-	double loglik = -0.5 * dotp -  0.5*log_det_hodlr ;
-	loglik = loglik - core_ng_loglike (z, theta, n) - N * log(theta[3]) - (double) (N / 2.0) * log(2.0 * PI);
-	return loglik;
-}*/
-
-
 void dense_non_gaussian( int argc, char* argv[])
 {
         double *theta=(double *) malloc(6 * sizeof(double)) ;
-        theta[0] = 7;
-        theta[1] = 0.5;
-        theta[2] = 5;
-        theta[3] = 1;
-        theta[4] = 0.2;
-        theta[5] = 0.2;
         double *initial_theta=(double *) malloc(6 * sizeof(double)) ;
-        int N;
+	int N,M,tol;
 
-        if(argc < 8)
+        if(argc < 15)
         {
                 std::cout << "All arguments weren't passed to executable!" << std::endl;
                 std::cout << "Using Default Arguments:" << std::endl;
+
+                theta[0] = 10;
+                theta[1] = 0.7;
+                theta[2] = 5;
+                theta[3] = 1;
+                theta[4] = 0.2;
+                theta[5] = 0.2;
+
                 initial_theta[0] = 0.1;
                 initial_theta[1] = 0.5;
                 initial_theta[2] = 0;
                 initial_theta[3] = 2;
                 initial_theta[4] = 0.1;
                 initial_theta[5] = 0.1;
-                N = 36;
+                N = 10000;
+                M = 200;
+                tol = 12;
         }
 
         else
         {
-                initial_theta[0] = atof(argv[1]);
-                initial_theta[1] = atof(argv[2]);
-                initial_theta[2] = atof(argv[3]);
-                initial_theta[3] = atof(argv[4]);
-                initial_theta[4] = atof(argv[5]);
-                initial_theta[5] = atof(argv[6]);
-                N = atoi(argv[7]);
+                theta[0] = atof(argv[1]);
+                theta[1] = atof(argv[2]);
+                theta[2] = atof(argv[3]);
+                theta[3] = atof(argv[4]);
+                theta[4] = atof(argv[5]);
+                theta[5] = atof(argv[6]);
+
+                initial_theta[0] = atof(argv[7]);
+                initial_theta[1] = atof(argv[8]);
+                initial_theta[2] = atof(argv[9]);
+                initial_theta[3] = atof(argv[10]);
+                initial_theta[4] = atof(argv[11]);
+                initial_theta[5] = atof(argv[12]);
+                N = atoi(argv[13]);
+                M = atoi(argv[14]);
+                tol = atoi(argv[15]);
         }
 
         double *z=(double *) malloc(N * sizeof(double)) ;
-        z = Tukey_gh(theta, N);
-        location* x;
-        int seed = 14;//remove after testing
-        x =  GenerateXYLoc( N,  seed);
-        write_vectors(z,x,N);
+        z = Tukey_gh(theta, N,0);
+	
+	//Eigen::VectorXd Z(N);
+	//int i;
+	//for(i=0;i<N;i++)
+	//{	
+	//	Z[i] = z[i];
+	//}
+
+	//std::cout << "dense z:" << Z << std::endl;
+        //location* x;
+        //int seed = 14;//remove after testing
+        //x =  GenerateXYLoc( N,  seed);
+        //write_vectors(z,x,N);
 
 
         MLE_ng_dense(z, N, initial_theta);
 }
 
+double MLE_ng_HODLR(double *z_0, double *theta, int N, int M, int tol)
+{
+	int i;
+	double PI = 3.141592653589793238;
+        double FLT_MAX = pow(10,7);
+        double nan_flag = 0;
+	tol = pow(10, - tol);
+	double start, end;
+	bool is_sym = true;
+    	bool is_pd  = true;
+
+	start = omp_get_wtime();
+	core_ng_transform(z_0,theta,N);
+        end = omp_get_wtime();
+	std::cout << "Time for core_ng_transform in HODLR: " << (end - start) << std::endl;
+
+	for (i=0;i<N;i++)
+            if(isnan(z_0[i]))
+                    nan_flag = 1;
+        if(nan_flag == 1)
+        {
+                printf("Inf case\n");
+                return -FLT_MAX;
+        }
+        else
+        {
+                Eigen::VectorXd z(N);
+                for(i=0;i<N;i++)
+                {
+                        z[i] = z_0[i];
+                }
+		
+		Kernel* K            = new Kernel(N, theta[0], theta[1], 0);
+		HODLR* T = new HODLR(N, M, tol);
+		start = omp_get_wtime();
+        	T->assemble(K, "rookPivoting", is_sym, is_pd);
+		end = omp_get_wtime();
+		std::cout << "Time for making cov mat in HODLR form: " << (end - start) << std::endl;
+	
+		start = omp_get_wtime();
+                Eigen::LLT<Mat> llt;
+                T->factorize();
+		end = omp_get_wtime();
+		Vec x = T->solve(z);
+		double dotp = z.adjoint()*x;
+		
+		std::cout << "Time to factorize in HODLR: " << (end - start) << std::endl;
+		
+		start = omp_get_wtime();
+		dtype log_det_hodlr = T->logDeterminant();
+		end = omp_get_wtime();
+		std::cout << "Time for logdet in HODLR: " << (end - start) << std::endl;
+
+                double loglik = -0.5 * dotp -  0.5*log_det_hodlr;
+
+                loglik = loglik - core_ng_loglike (z_0, theta, N) - N * log(theta[3]) - (double) ( N / 2.0) * log(2.0 * PI);
+               // std::cout << "dotp:" << std::setprecision(16) <<dotp << std::endl;
+               // std::cout << "logdet:" << std::setprecision(16)  << log_det_hodlr << std::endl;
+               // std::cout << "core_ng_loglike:" <<std::setprecision(16) << core_ng_loglike (z_0, theta, N) << std::endl;
+               // std::cout << "logtheta:" <<std::setprecision(16) << N * log(theta[3]) << std::endl;
+               // std::cout << "loglik:" << std::setprecision(16) <<loglik << std::endl;
+                return loglik;
+       }
+}
+
+
+void HODLR_non_gaussian( int argc, char* argv[])
+{
+        double *theta=(double *) malloc(6 * sizeof(double)) ;
+        double *initial_theta=(double *) malloc(6 * sizeof(double)) ;
+        int N,M,tol;
+
+        if(argc < 15)
+        {
+                std::cout << "All arguments weren't passed to executable!" << std::endl;
+                std::cout << "Using Default Arguments:" << std::endl;
+		
+		theta[0] = 10;
+        	theta[1] = 0.7;
+        	theta[2] = 5;
+        	theta[3] = 1;
+        	theta[4] = 0.2;
+        	theta[5] = 0.2;
+
+                initial_theta[0] = 0.1;
+                initial_theta[1] = 0.5;
+                initial_theta[2] = 0;
+                initial_theta[3] = 2;
+                initial_theta[4] = 0.1;
+                initial_theta[5] = 0.1;
+                N = 10000;
+		M = 200;
+		tol = 12;
+        }
+
+        else
+        {	
+		theta[0] = atof(argv[1]);
+                theta[1] = atof(argv[2]);
+                theta[2] = atof(argv[3]);
+                theta[3] = atof(argv[4]);
+                theta[4] = atof(argv[5]);
+                theta[5] = atof(argv[6]);
+
+                initial_theta[0] = atof(argv[7]);
+                initial_theta[1] = atof(argv[8]);
+                initial_theta[2] = atof(argv[9]);
+                initial_theta[3] = atof(argv[10]);
+                initial_theta[4] = atof(argv[11]);
+                initial_theta[5] = atof(argv[12]);
+                N = atoi(argv[13]);
+		M = atoi(argv[14]);
+		tol = atoi(argv[15]);
+        }
+
+        double *z=(double *) malloc(N * sizeof(double)) ;
+        z = Tukey_gh(theta, N,0);
+	
+	//Eigen::VectorXd Z(N);
+        //int i;
+        //for(i=0;i<N;i++)
+        //{
+        //        Z[i] = z[i];
+        //}
+
+	//std::cout << "hodlr z:" << Z << std::endl;
+       	//location* x;
+        //int seed = 14;//remove after testing
+        //x =  GenerateXYLoc( N,  seed);
+        //write_vectors(z,x,N);
+
+
+        MLE_ng_HODLR( z, initial_theta, N, M, tol);
+}
+
 
 int main(int argc, char* argv[])
 {	
-	dense_non_gaussian(argc, argv);
-	//hodler_non_gaussian(argc, argv);
+	HODLR_non_gaussian(argc, argv);
+	//dense_non_gaussian(argc, argv);
 }
 
 /*int main(int argc, char* argv[]) 
