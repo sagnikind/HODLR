@@ -2,6 +2,7 @@
 #include "HODLR.hpp"
 #include <math.h>
 #include <sys/stat.h>
+#include <nlopt.h>
 //#include <gsl/gsl_sf_bessel.h>
 //#include <gsl/gsl_errno.h>
 //#include <gsl/gsl_fft_complex.h>
@@ -703,8 +704,37 @@ void HODLR_non_gaussian( int argc, char* argv[])
 
 int main(int argc, char* argv[])
 {	
-	HODLR_non_gaussian(argc, argv);
+	//HODLR_non_gaussian(argc, argv);
 	//dense_non_gaussian(argc, argv);
+
+	nlopt_opt opt;
+	int num_params = 6;
+	int j;
+	double *starting_theta;
+	starting_theta    = (double *) malloc(num_params * sizeof(double));
+
+	double* lb = (double *) malloc(num_params * sizeof(double));
+    	double* up = (double *) malloc(num_params * sizeof(double));
+		
+	lb[0] = 0.01; lb[1] = 0.01; lb[2] = -5; lb[3] = 0.01; lb[4] = -2; lb[5] = 0.01;
+	up[0] = 10; up[1] = 5; up[2] = 5; up[3] = 5; up[4] = 2; up[5] = 1;
+
+
+	for(j=0; j<num_params; j++)
+            starting_theta[j] = lb[j];
+
+	starting_theta[4]=0.2;
+        starting_theta[5]=0.2;
+	
+	//double opt_f = MLE_ng_HODLR( z, starting_theta, N, M, tol);
+	double opt_f;
+	
+	opt=nlopt_create(NLOPT_LN_BOBYQA, num_params);
+    	init_optimizer(&opt, lb, up, pow(10, -5));
+    	nlopt_set_maxeval(opt, 1000);
+
+	nlopt_set_max_objective(opt, MLE_ng_HODLR, NULL);
+        nlopt_optimize(opt, starting_theta, &opt_f);
 }
 
 /*int main(int argc, char* argv[]) 
