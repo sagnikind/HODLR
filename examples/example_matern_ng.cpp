@@ -701,6 +701,21 @@ void HODLR_non_gaussian( int argc, char* argv[])
         MLE_ng_HODLR( z, initial_theta, N, M, tol);
 }
 
+typedef struct
+{
+	double *obs; //observations
+	int M; // HODLR M parameter
+	int tol;// HODLR tol parameter 
+}MLE_HODLR_data;
+
+double MLE_ng_HODLR_alg(unsigned n, const double * theta, double * grad, void * data)
+{
+	double *z = (double *) malloc(n * sizeof(double)) ;
+	z = ((MLE_HODLR_data*)data)->obs;
+	int M = ((MLE_HODLR_data*)data)->M;
+	int tol = ((MLE_HODLR_data*)data)->tol;
+	return MLE_ng_HODLR( z, theta, n, M, tol);
+}
 
 int main(int argc, char* argv[])
 {	
@@ -733,7 +748,7 @@ int main(int argc, char* argv[])
     	init_optimizer(&opt, lb, up, pow(10, -5));
     	nlopt_set_maxeval(opt, 1000);
 
-	nlopt_set_max_objective(opt, MLE_ng_HODLR, NULL);
+	nlopt_set_max_objective(opt, MLE_ng_HODLR_alg, NULL);
         nlopt_optimize(opt, starting_theta, &opt_f);
 }
 
