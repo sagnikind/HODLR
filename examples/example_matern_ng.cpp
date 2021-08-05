@@ -376,7 +376,7 @@ double newton_raphson(double z, double xi, double omega, double g, double h, dou
 	return x1;
 }
 
-void core_ng_transform (double *Z, double *localtheta, int m) {
+void core_ng_transform (double *Z,const double *localtheta, int m) {
 
 	//localtheta[2] ---> \xi (location)
 	//localtheta[3] ---> \omega (scale)
@@ -402,7 +402,7 @@ void core_ng_transform (double *Z, double *localtheta, int m) {
        // std::cout << "After transformation:\n" << z << std::endl;
 }
 
-double core_ng_loglike (double *Z, double *localtheta, int m) {
+double core_ng_loglike (double *Z,const double *localtheta, int m) {
 
     //localtheta[2] ---> \xi (location)
     //localtheta[3] ---> \omega (scale)
@@ -566,7 +566,7 @@ void dense_non_gaussian( int argc, char* argv[])
         MLE_ng_dense(z, N, initial_theta);
 }
 
-double MLE_ng_HODLR(double *z_0, double *theta, int N, int M, int tol)
+double MLE_ng_HODLR(double *z_0, const double *theta, int N, int M, int tol)
 {
 	int i;
 	double PI = 3.141592653589793238;
