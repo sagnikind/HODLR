@@ -16,7 +16,7 @@ set (DTYPE "double")
 # Change this accordingly to point to the Eigen root folder
 # By default, it will pick up the environment variable EIGEN_PATH
 set(EIGEN_PATH "$ENV{EIGEN_PATH}")
-
+set(NLOPT_PATH "$ENV{NLOPT_PATH}")
 ################ FINDING MKL ####################
 
 # Checking for MKL:
@@ -51,9 +51,9 @@ endif()
 
 # Toggle this to 1 when Intel Compilers are available:
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${DTYPE_FLAG} ${MKL_FLAGS} --std=c++11 -O3 -ipo -qopenmp -xHost -funroll-loops -ffast-math -ffinite-math-only -g -liomp5 -lpthread -ldl -L/home/mondals/codes/gsl-2.4/gsl_install/lib -lgsl -lgslcblas -lm")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${DTYPE_FLAG} ${MKL_FLAGS} --std=c++11 -O3 -ipo -qopenmp -xHost -funroll-loops -ffast-math -ffinite-math-only -g -liomp5 -lpthread -ldl -L/home/mondals/codes/gsl-2.4/gsl_install/lib -lnlopt -lgsl -lgslcblas -lm")
 else()
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${DTYPE_FLAG} ${MKL_FLAGS} --std=c++11 -O3 -funroll-loops -ffast-math -ffinite-math-only -g -fopenmp -lpthread -ldl -L/home/mondals/codes/gsl-2.4/gsl_install/lib -lgsl -lgslcblas -lm")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${DTYPE_FLAG} ${MKL_FLAGS} --std=c++11 -O3 -funroll-loops -ffast-math -ffinite-math-only -g -fopenmp -lpthread -ldl -L/home/mondals/codes/gsl-2.4/gsl_install/lib -lgsl -lnlopt -lgslcblas -lm")
 endif ()
 
 # Flags for testing coverage information
@@ -64,7 +64,8 @@ set(CMAKE_SHARED_LINKER_FLAGS_COVERAGE "${CMAKE_SHARED_LINKER_FLAGS} --coverage"
 
 ################ ADDING OF THE NECESSARY HEADER FOLDERS ####################
 # Adding folders which contain necessary header files:
-include_directories("${EIGEN_PATH}" 
+include_directories("${EIGEN_PATH}"
+					"${NLOPT_PATH}" 
                     "include"
                    )
 
@@ -104,6 +105,7 @@ message("Data Type        : " ${DTYPE})
 message("CXX Compiler     : " ${CMAKE_CXX_COMPILER})
 message("CXX_FLAGS        : " ${CMAKE_CXX_FLAGS})
 message("Eigen dir        : " ${EIGEN_PATH})
+message("NLOPT dir        : " ${NLOPT_PATH})
 # message("MKL dir          : " ${MKLROOT})
 message("Build dir        : " ${CMAKE_BINARY_DIR})
 message("")

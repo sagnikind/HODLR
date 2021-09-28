@@ -3,9 +3,26 @@
 #include <math.h>
 #include <sys/stat.h>
 #include <nlopt.h>
-//#include <gsl/gsl_sf_bessel.h>
-//#include <gsl/gsl_errno.h>
-//#include <gsl/gsl_fft_complex.h>
+#include <gsl/gsl_sf_bessel.h>
+#include <gsl/gsl_errno.h>
+#include <gsl/gsl_fft_complex.h>
+
+
+void init_optimizer( nlopt_opt * opt, double *lb, double *up, double tol)
+    //! Initialize the NLOPT optimizer
+    /*!
+     * Returns nlopt_opt object.
+     * @param[in] lb: optimization lower bounds vector ( lb_1, lb_2, lb_3).
+     * @param[in] up: optimization upper bounds vector ( ub_1, ub_2, ub_3).
+     * @param[in] tol: a tolerance that is used for the purpose of stopping criteria only.
+     * @param[out] opt: nlopt_opt object.
+     * */
+{
+    //initalizing opt library
+    nlopt_set_lower_bounds(*opt, lb);
+    nlopt_set_upper_bounds(*opt, up);
+    nlopt_set_ftol_abs(*opt, tol);
+}
 
 /** ****************************************************************************
 
@@ -391,7 +408,8 @@ void core_ng_transform (double *Z,const double *localtheta, int m) {
 	int i=0;
 	for(i = 0; i < m; i++)
 		Z[i] =  newton_raphson(Z[i], xi, omega, g, h, eps);
-	
+
+//exit(0);	
 	Eigen::VectorXd z(m);
 
 	for(i=0;i<m;i++)
@@ -438,7 +456,7 @@ double MLE_ng_dense(double *z_0, int N, double *theta)
 {	
 	int i;
 	double PI = 3.141592653589793238;
-	double FLT_MAX = pow(10,7);
+	//double FLT_MAX = pow(10,7);
 	double nan_flag = 0;
 	double start, end;
 	
@@ -566,139 +584,146 @@ void dense_non_gaussian( int argc, char* argv[])
         MLE_ng_dense(z, N, initial_theta);
 }
 
-double MLE_ng_HODLR(double *z_0, const double *theta, int N, int M, int tol)
+double MLE_ng_HODLR(double *z_0, const double *theta, int N, int M, double tol)
 {
-	int i;
-	double PI = 3.141592653589793238;
-        double FLT_MAX = pow(10,7);
-        double nan_flag = 0;
-	tol = pow(10, - tol);
-	double start, end;
-	bool is_sym = true;
-    	bool is_pd  = true;
+    int i;
+    double PI = 3.141592653589793238;
+    //double FLT_MAX = pow(10,7);
+    double nan_flag = 0;
+    tol = pow(10, - tol);
+    double start, end;
+    bool is_sym = true;
+    bool is_pd  = true;
 
-	start = omp_get_wtime();
-	core_ng_transform(z_0,theta,N);
-        end = omp_get_wtime();
-	std::cout << "Time for core_ng_transform in HODLR: " << (end - start) << std::endl;
+    start = omp_get_wtime();
+    core_ng_transform(z_0,theta,N);
+    end = omp_get_wtime();
 
-	for (i=0;i<N;i++)
-            if(isnan(z_0[i]))
-                    nan_flag = 1;
-        if(nan_flag == 1)
+    std::cout << "Time for core_ng_transform in HODLR: " << (end - start) << std::endl;
+
+    for (i=0;i<N;i++)
+        if(isnan(z_0[i]))
+            nan_flag = 1;
+    if(nan_flag == 1)
+    {
+        printf("Inf case\n");
+        return -FLT_MAX;
+    }
+    else
+    {
+        Eigen::VectorXd z(N);
+        for(i=0;i<N;i++)
         {
-                printf("Inf case\n");
-                return -FLT_MAX;
-        }
-        else
-        {
-                Eigen::VectorXd z(N);
-                for(i=0;i<N;i++)
-                {
-                        z[i] = z_0[i];
-                }
-		
+			z[i] = z_0[i];
+		}
+		std::cout << "========================= Problem Parameters =========================" << std::endl;
+		tol = 1e-12;
+		std::cout << "Matrix Size                        :" << N << std::endl;
+		std::cout << "Leaf Size                          :" << M << std::endl;
+		std::cout << "Tolerance                          :" << tol << std::endl << std::endl;	
 		Kernel* K            = new Kernel(N, theta[0], theta[1], 0);
 		HODLR* T = new HODLR(N, M, tol);
 		start = omp_get_wtime();
-        	T->assemble(K, "rookPivoting", is_sym, is_pd);
+		std::cout << "Making cov mat in HODLR form ... " << std::endl;
+		T->assemble(K, "rookPivoting", is_sym, is_pd);
 		end = omp_get_wtime();
 		std::cout << "Time for making cov mat in HODLR form: " << (end - start) << std::endl;
-	
+
 		start = omp_get_wtime();
-                Eigen::LLT<Mat> llt;
-                T->factorize();
+		Eigen::LLT<Mat> llt;
+		T->factorize();
 		end = omp_get_wtime();
 		Vec x = T->solve(z);
 		double dotp = z.adjoint()*x;
-		
+
 		std::cout << "Time to factorize in HODLR: " << (end - start) << std::endl;
-		
+
 		start = omp_get_wtime();
 		dtype log_det_hodlr = T->logDeterminant();
 		end = omp_get_wtime();
 		std::cout << "Time for logdet in HODLR: " << (end - start) << std::endl;
 
-                double loglik = -0.5 * dotp -  0.5*log_det_hodlr;
+		double loglik = -0.5 * dotp -  0.5*log_det_hodlr;
 
-                loglik = loglik - core_ng_loglike (z_0, theta, N) - N * log(theta[3]) - (double) ( N / 2.0) * log(2.0 * PI);
-               // std::cout << "dotp:" << std::setprecision(16) <<dotp << std::endl;
-               // std::cout << "logdet:" << std::setprecision(16)  << log_det_hodlr << std::endl;
-               // std::cout << "core_ng_loglike:" <<std::setprecision(16) << core_ng_loglike (z_0, theta, N) << std::endl;
-               // std::cout << "logtheta:" <<std::setprecision(16) << N * log(theta[3]) << std::endl;
-               // std::cout << "loglik:" << std::setprecision(16) <<loglik << std::endl;
-                return loglik;
-       }
+		loglik = loglik - core_ng_loglike (z_0, theta, N) - N * log(theta[3]) - (double) ( N / 2.0) * log(2.0 * PI);
+		// std::cout << "dotp:" << std::setprecision(16) <<dotp << std::endl;
+		// std::cout << "logdet:" << std::setprecision(16)  << log_det_hodlr << std::endl;
+		// std::cout << "core_ng_loglike:" <<std::setprecision(16) << core_ng_loglike (z_0, theta, N) << std::endl;
+		// std::cout << "logtheta:" <<std::setprecision(16) << N * log(theta[3]) << std::endl;
+		// std::cout << "loglik:" << std::setprecision(16) <<loglik << std::endl;
+
+		return loglik;
+	}
 }
 
 
 void HODLR_non_gaussian( int argc, char* argv[])
 {
-        double *theta=(double *) malloc(6 * sizeof(double)) ;
-        double *initial_theta=(double *) malloc(6 * sizeof(double)) ;
-        int N,M,tol;
+	double *theta=(double *) malloc(6 * sizeof(double)) ;
+	double *initial_theta=(double *) malloc(6 * sizeof(double)) ;
+	int N,M,tol;
 
-        if(argc < 15)
-        {
-                std::cout << "All arguments weren't passed to executable!" << std::endl;
-                std::cout << "Using Default Arguments:" << std::endl;
-		
+	if(argc < 15)
+	{
+		std::cout << "All arguments weren't passed to executable!" << std::endl;
+		std::cout << "Using Default Arguments:" << std::endl;
+
 		theta[0] = 10;
-        	theta[1] = 0.7;
-        	theta[2] = 5;
-        	theta[3] = 1;
-        	theta[4] = 0.2;
-        	theta[5] = 0.2;
+		theta[1] = 0.7;
+		theta[2] = 5;
+		theta[3] = 1;
+		theta[4] = 0.2;
+		theta[5] = 0.2;
 
-                initial_theta[0] = 0.1;
-                initial_theta[1] = 0.5;
-                initial_theta[2] = 0;
-                initial_theta[3] = 2;
-                initial_theta[4] = 0.1;
-                initial_theta[5] = 0.1;
-                N = 10000;
-		M = 200;
+		initial_theta[0] = 0.1;
+		initial_theta[1] = 0.5;
+		initial_theta[2] = 0;
+		initial_theta[3] = 2;
+		initial_theta[4] = 0.1;
+		initial_theta[5] = 0.1;
+		N = 10000;
+		M = 100;
 		tol = 12;
-        }
+	}
 
-        else
-        {	
+	else
+	{	
 		theta[0] = atof(argv[1]);
-                theta[1] = atof(argv[2]);
-                theta[2] = atof(argv[3]);
-                theta[3] = atof(argv[4]);
-                theta[4] = atof(argv[5]);
-                theta[5] = atof(argv[6]);
+		theta[1] = atof(argv[2]);
+		theta[2] = atof(argv[3]);
+		theta[3] = atof(argv[4]);
+		theta[4] = atof(argv[5]);
+		theta[5] = atof(argv[6]);
 
-                initial_theta[0] = atof(argv[7]);
-                initial_theta[1] = atof(argv[8]);
-                initial_theta[2] = atof(argv[9]);
-                initial_theta[3] = atof(argv[10]);
-                initial_theta[4] = atof(argv[11]);
-                initial_theta[5] = atof(argv[12]);
-                N = atoi(argv[13]);
+		initial_theta[0] = atof(argv[7]);
+		initial_theta[1] = atof(argv[8]);
+		initial_theta[2] = atof(argv[9]);
+		initial_theta[3] = atof(argv[10]);
+		initial_theta[4] = atof(argv[11]);
+		initial_theta[5] = atof(argv[12]);
+		N = atoi(argv[13]);
 		M = atoi(argv[14]);
 		tol = atoi(argv[15]);
-        }
+	}
 
-        double *z=(double *) malloc(N * sizeof(double)) ;
-        z = Tukey_gh(theta, N,0);
-	
+	double *z=(double *) malloc(N * sizeof(double)) ;
+	z = Tukey_gh(theta, N,0);
+
 	//Eigen::VectorXd Z(N);
-        //int i;
-        //for(i=0;i<N;i++)
-        //{
-        //        Z[i] = z[i];
-        //}
+	//int i;
+	//for(i=0;i<N;i++)
+	//{
+	//        Z[i] = z[i];
+	//}
 
 	//std::cout << "hodlr z:" << Z << std::endl;
-       	//location* x;
-        //int seed = 14;//remove after testing
-        //x =  GenerateXYLoc( N,  seed);
-        //write_vectors(z,x,N);
+	//location* x;
+	//int seed = 14;//remove after testing
+	//x =  GenerateXYLoc( N,  seed);
+	//write_vectors(z,x,N);
 
 
-        MLE_ng_HODLR( z, initial_theta, N, M, tol);
+	MLE_ng_HODLR( z, initial_theta, N, M, tol);
 }
 
 typedef struct
@@ -713,15 +738,17 @@ double MLE_ng_HODLR_alg(unsigned n, const double * theta, double * grad, void * 
 	double *z = (double *) malloc(n * sizeof(double)) ;
 	z = ((MLE_HODLR_data*)data)->obs;
 	int M = ((MLE_HODLR_data*)data)->M;
-	int tol = ((MLE_HODLR_data*)data)->tol;
+	double tol = ((MLE_HODLR_data*)data)->tol;
+
+
 	return MLE_ng_HODLR( z, theta, n, M, tol);
 }
 
 int main(int argc, char* argv[])
 {	
-	//HODLR_non_gaussian(argc, argv);
+	HODLR_non_gaussian(argc, argv);
 	//dense_non_gaussian(argc, argv);
-
+	double  opt_f;
 	nlopt_opt opt;
 	int num_params = 6;
 	int j;
@@ -729,151 +756,162 @@ int main(int argc, char* argv[])
 	starting_theta    = (double *) malloc(num_params * sizeof(double));
 
 	double* lb = (double *) malloc(num_params * sizeof(double));
-    	double* up = (double *) malloc(num_params * sizeof(double));
-		
-	lb[0] = 0.01; lb[1] = 0.01; lb[2] = -5; lb[3] = 0.01; lb[4] = -2; lb[5] = 0.01;
-	up[0] = 10; up[1] = 5; up[2] = 5; up[3] = 5; up[4] = 2; up[5] = 1;
+	double* up = (double *) malloc(num_params * sizeof(double));
+
+	lb[0] = 0.01;
+	lb[1] = 0.01;
+	lb[2] = -5;
+	lb[3] = 0.01;
+	lb[4] = -2;
+	lb[5] = 0.01;
+
+	up[0] = 10;
+	up[1] = 5;
+	up[2] = 5;
+	up[3] = 5;
+	up[4] = 2;
+	up[5] = 1;
 
 
-	for(j=0; j<num_params; j++)
-            starting_theta[j] = lb[j];
+	for(j=0; j < num_params; j++)
+		starting_theta[j] = lb[j];
 
 	starting_theta[4]=0.2;
-        starting_theta[5]=0.2;
-	
-	//double opt_f = MLE_ng_HODLR( z, starting_theta, N, M, tol);
-	double opt_f;
-	
+	starting_theta[5]=0.2;
+
+	//MLE_ng_HODLR( z, starting_theta, N, M, tol);
+
+
 	opt=nlopt_create(NLOPT_LN_BOBYQA, num_params);
-    	init_optimizer(&opt, lb, up, pow(10, -5));
-    	nlopt_set_maxeval(opt, 1000);
+	init_optimizer(&opt, lb, up, pow(10, -5));
+	nlopt_set_maxeval(opt, 1000);
 
 	nlopt_set_max_objective(opt, MLE_ng_HODLR_alg, NULL);
-        nlopt_optimize(opt, starting_theta, &opt_f);
+	nlopt_optimize(opt, starting_theta, &opt_f);
 }
 
 /*int main(int argc, char* argv[]) 
+  {
+  int N, M;
+  double tolerance;
+  double phi,nu;
+
+  if(argc < 6)
+  {
+  std::cout << "All arguments weren't passed to executable!" << std::endl;
+  std::cout << "Using Default Arguments:" << std::endl;
+// Size of the Matrix in consideration:
+N          = 10000;
+// Size of Matrices at leaf level:
+M          = 200;
+// Tolerance of problem
+tolerance  = pow(10, -12);
+phi = 0.1;
+nu = 0.5;
+}
+
+else
 {
-	int N, M;
-	double tolerance;
-        double phi,nu;
+// Size of the Matrix in consideration:
+N          = atoi(argv[1]);
+// Size of Matrices at leaf level:
+M          = atoi(argv[2]);
+// Tolerance of problem
+tolerance  = pow(10, -atoi(argv[3]));
+phi = atof(argv[4]);
+nu = atof(argv[5]);
+}
 
-	if(argc < 6)
-	{
-		std::cout << "All arguments weren't passed to executable!" << std::endl;
-		std::cout << "Using Default Arguments:" << std::endl;
-		// Size of the Matrix in consideration:
-		N          = 10000;
-		// Size of Matrices at leaf level:
-		M          = 200;
-		// Tolerance of problem
-		tolerance  = pow(10, -12);
-		phi = 0.1;
-		nu = 0.5;
-	}
+// Declaration of HODLR_Matrix object that abstracts data in Matrix:
+Kernel* K            = new Kernel(N, phi, nu, 0);
 
-	else
-	{
-		// Size of the Matrix in consideration:
-		N          = atoi(argv[1]);
-		// Size of Matrices at leaf level:
-		M          = atoi(argv[2]);
-		// Tolerance of problem
-		tolerance  = pow(10, -atoi(argv[3]));
-		phi = atof(argv[4]);
-		nu = atof(argv[5]);
-	}
+std::cout << "========================= Problem Parameters =========================" << std::endl;
+std::cout << "Matrix Size                        :" << N << std::endl;
+std::cout << "Leaf Size                          :" << M << std::endl;
+std::cout << "Tolerance                          :" << tolerance << std::endl << std::endl;
 
-	// Declaration of HODLR_Matrix object that abstracts data in Matrix:
-	Kernel* K            = new Kernel(N, phi, nu, 0);
+// Variables used in timing:
+double start, end;
 
-	std::cout << "========================= Problem Parameters =========================" << std::endl;
-	std::cout << "Matrix Size                        :" << N << std::endl;
-	std::cout << "Leaf Size                          :" << M << std::endl;
-	std::cout << "Tolerance                          :" << tolerance << std::endl << std::endl;
+std::cout << "Fast method..." << std::endl;
 
-	// Variables used in timing:
-	double start, end;
+bool is_sym = true;
+bool is_pd  = true;
 
-	std::cout << "Fast method..." << std::endl;
+// Creating a pointer to the HODLR Tree structure:
+HODLR* T = new HODLR(N, M, tolerance);
 
-	bool is_sym = true;
-	bool is_pd  = true;
+start = omp_get_wtime();
+T->assemble(K, "rookPivoting", is_sym, is_pd);
+end = omp_get_wtime();
+std::cout << "Time for assembly in HODLR form:" << (end - start) << std::endl;
 
-	// Creating a pointer to the HODLR Tree structure:
-	HODLR* T = new HODLR(N, M, tolerance);
+// Random Matrix to multiply with
+Mat x = (Mat::Random(N, 1)).real();
+// Stores the result after multiplication:
+Mat y_fast, b_fast;
 
-	start = omp_get_wtime();
-	T->assemble(K, "rookPivoting", is_sym, is_pd);
-	end = omp_get_wtime();
-	std::cout << "Time for assembly in HODLR form:" << (end - start) << std::endl;
+start  = omp_get_wtime();
+b_fast = T->matmatProduct(x);
+end    = omp_get_wtime();
 
-	// Random Matrix to multiply with
-	Mat x = (Mat::Random(N, 1)).real();
-	// Stores the result after multiplication:
-	Mat y_fast, b_fast;
+std::cout << "Time for matrix-vector product:" << (end - start) << std::endl << std::endl;
+
+start = omp_get_wtime();
+T->factorize();
+end   = omp_get_wtime();
+std::cout << "Time to factorize:" << (end-start) << std::endl;
+
+Mat x_fast;
+start  = omp_get_wtime();
+x_fast = T->solve(b_fast);
+end    = omp_get_wtime();
+
+std::cout << "Time to solve:" << (end-start) << std::endl;
+
+if(is_sym == true && is_pd == true)
+{
+	start  = omp_get_wtime();
+	y_fast = T->symmetricFactorTransposeProduct(x);
+	end    = omp_get_wtime();
+	std::cout << "Time to calculate product of factor transpose with given vector:" << (end - start) << std::endl;
 
 	start  = omp_get_wtime();
-	b_fast = T->matmatProduct(x);
+	b_fast = T->symmetricFactorProduct(y_fast);
 	end    = omp_get_wtime();
+	std::cout << "Time to calculate product of factor with given vector:" << (end - start) << std::endl;        
+}
 
-	std::cout << "Time for matrix-vector product:" << (end - start) << std::endl << std::endl;
+start = omp_get_wtime();
+dtype log_det_hodlr = T->logDeterminant();
+end = omp_get_wtime();
+std::cout << "Time to calculate log determinant using HODLR:" << (end-start) << std::endl;
 
+// Direct method:
+start = omp_get_wtime();
+Mat B = K->getMatrix(0, 0, N, N);
+end   = omp_get_wtime();
+
+if(is_sym == true && is_pd == true)
+{
 	start = omp_get_wtime();
-	T->factorize();
-	end   = omp_get_wtime();
-	std::cout << "Time to factorize:" << (end-start) << std::endl;
-
-	Mat x_fast;
-	start  = omp_get_wtime();
-	x_fast = T->solve(b_fast);
-	end    = omp_get_wtime();
-
-	std::cout << "Time to solve:" << (end-start) << std::endl;
-
-	if(is_sym == true && is_pd == true)
-	{
-		start  = omp_get_wtime();
-		y_fast = T->symmetricFactorTransposeProduct(x);
-		end    = omp_get_wtime();
-		std::cout << "Time to calculate product of factor transpose with given vector:" << (end - start) << std::endl;
-
-		start  = omp_get_wtime();
-		b_fast = T->symmetricFactorProduct(y_fast);
-		end    = omp_get_wtime();
-		std::cout << "Time to calculate product of factor with given vector:" << (end - start) << std::endl;        
-	}
-
-	start = omp_get_wtime();
-	dtype log_det_hodlr = T->logDeterminant();
+	Eigen::LLT<Mat> llt;
+	llt.compute(B);
 	end = omp_get_wtime();
-	std::cout << "Time to calculate log determinant using HODLR:" << (end-start) << std::endl;
+	std::cout << "Time to calculate LLT Factorization:" << (end-start) << std::endl;
+}
 
-	// Direct method:
+else
+{
 	start = omp_get_wtime();
-	Mat B = K->getMatrix(0, 0, N, N);
-	end   = omp_get_wtime();
+	Eigen::PartialPivLU<Mat> lu;
+	lu.compute(B);
+	end = omp_get_wtime();
+	std::cout << "Time to calculate LU Factorization:" << (end-start) << std::endl;        
+}
 
-	if(is_sym == true && is_pd == true)
-	{
-		start = omp_get_wtime();
-		Eigen::LLT<Mat> llt;
-		llt.compute(B);
-		end = omp_get_wtime();
-		std::cout << "Time to calculate LLT Factorization:" << (end-start) << std::endl;
-	}
+delete K;
+delete T;
 
-	else
-	{
-		start = omp_get_wtime();
-		Eigen::PartialPivLU<Mat> lu;
-		lu.compute(B);
-		end = omp_get_wtime();
-		std::cout << "Time to calculate LU Factorization:" << (end-start) << std::endl;        
-	}
-
-	delete K;
-	delete T;
-
-	return 0;
+return 0;
 }*/
