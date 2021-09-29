@@ -51,9 +51,9 @@ endif()
 
 # Toggle this to 1 when Intel Compilers are available:
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${DTYPE_FLAG} ${MKL_FLAGS} --std=c++11 -O3 -ipo -qopenmp -xHost -funroll-loops -ffast-math -ffinite-math-only -g -liomp5 -lpthread -ldl -L/home/mondals/codes/gsl-2.4/gsl_install/lib -lnlopt -lgsl -lgslcblas -lm")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${DTYPE_FLAG} ${MKL_FLAGS} --std=c++11 -O3 -ipo -qopenmp -xHost -funroll-loops -ffast-math -ffinite-math-only -g -liomp5 -lpthread -ldl -L/home/mondals/codes/gsl-2.4/gsl_install/lib -lnlopt -lgsl -L${MKLROOT}/lib/intel64 -lmkl_intel_lp64 -lmkl_core -lmkl_gnu_thread  -lgslcblas -Wl,--no-as-needed -lpthread -lm -ldl")
 else()
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${DTYPE_FLAG} ${MKL_FLAGS} --std=c++11 -O3 -funroll-loops -ffast-math -ffinite-math-only -g -fopenmp -lpthread -ldl -L/home/mondals/codes/gsl-2.4/gsl_install/lib -lgsl -lnlopt -lgslcblas -lm")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${DTYPE_FLAG} ${MKL_FLAGS} --std=c++11 -O3 -funroll-loops -ffast-math -ffinite-math-only -g -fopenmp -lpthread -ldl -L/home/mondals/codes/gsl-2.4/gsl_install/lib -lgsl -lnlopt -L${MKLROOT}/lib/intel64 -lmkl_intel_lp64 -lmkl_core -lmkl_gnu_thread  -lgslcblas -Wl,--no-as-needed -lpthread -lm -ldl")
 endif ()
 
 # Flags for testing coverage information
@@ -65,7 +65,9 @@ set(CMAKE_SHARED_LINKER_FLAGS_COVERAGE "${CMAKE_SHARED_LINKER_FLAGS} --coverage"
 ################ ADDING OF THE NECESSARY HEADER FOLDERS ####################
 # Adding folders which contain necessary header files:
 include_directories("${EIGEN_PATH}"
-					"${NLOPT_PATH}" 
+					"${NLOPT_PATH}"
+                    "/opt/ecrc/mkl/2020.0.166/mkl/include/"
+                    "/opt/ecrc/gsl/2.4-gcc-7.2.0/ub16/include/" 
                     "include"
                    )
 
