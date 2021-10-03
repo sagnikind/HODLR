@@ -11,7 +11,8 @@
 
   Structure for identifies two dimensions struct with two vectors (x and y).
  **/
-int count = 1;
+int count = 0;
+int iters = 0;
 double nan_flag = 0;
 typedef struct {
     double *x; ///< Values in X dimension.
@@ -27,8 +28,21 @@ typedef struct
     int N;       //Matrix size.
     int nLeaf;   //HODLR nLeaf parameter.
     double tol;     //HODLR tol parameter.
+    int seed;
 } MLE_HODLR_data;
 
+typedef struct {
+    double final_loglik;
+    double time_per_iteration;
+    double time_per_generation;
+    double time_per_factorization;
+    double time_per_solver;
+    double *initial_theta;
+    double *estimated_theta;
+} output;
+
+
+output results;
 
 static double calculateDistance( location* l1, location* l2, int l1_index,
         int l2_index, int distance_metric, int z_flag) {
@@ -556,7 +570,7 @@ double* dense_data_generation_non_gaussian(MLE_HODLR_data *data)
 
     double *z=(double *) malloc(data->N * sizeof(double)) ;
 
-    z = Tukey_gh(data->initial_theta, data->N, 0, data);
+    z = Tukey_gh(data->initial_theta, data->N, data->seed, data);
 
     return z;
 }
@@ -567,7 +581,8 @@ double MLE_ng_HODLR(double *z_0, const double *theta, int N, int M, double tol)
     double PI = 3.141592653589793238;
     //double FLT_MAX = pow(10,7);
     nan_flag = 0;
-    tol = pow(10, - tol);
+    double tol_print =tol;
+    tol = pow(10, tol);
     double start, end;
     bool is_sym = true;
     bool is_pd  = true;
@@ -588,7 +603,7 @@ double MLE_ng_HODLR(double *z_0, const double *theta, int N, int M, double tol)
 
     if(nan_flag == 1)
     {
-        std::cout <<count++<<"- ("<<theta[0]<<", "<<theta[1]<<", "<< theta[2]<<", "<<theta[3]<<", "<< theta[4]<<", "<<theta[5]<<")---> LogLi (inf case) = "<<  -FLT_MAX<<"\n";
+        std::cout <<iters++<<"- ("<<theta[0]<<", "<<theta[1]<<", "<< theta[2]<<", "<<theta[3]<<", "<< theta[4]<<", "<<theta[5]<<")---> LogLi (inf case) = "<<  -FLT_MAX<<"\n";
         std::cout << "========================================================= "<< std::endl;
         return -FLT_MAX;
     }
@@ -601,42 +616,63 @@ double MLE_ng_HODLR(double *z_0, const double *theta, int N, int M, double tol)
         }
 
         Kernel* K            = new Kernel(N, theta[0], theta[1], 0);
-
+        //printf("%d, %d, %e\n", N, M ,tol);
         HODLR* T = new HODLR(N, M, tol);
         start = omp_get_wtime();
+        //  std::cout <<count++<<"- ("<<theta[0]<<", "<<theta[1]<<", "<< theta[2]<<", "<<theta[3]<<", "<< theta[4]<<", "<<theta[5]<<")\n";
         std::cout << "Making cov mat in HODLR form ... " << std::endl;
         T->assemble(K, "rookPivoting", is_sym, is_pd);
+        //std::string path = "image"+std::to_string(theta[0])+"-"+std::to_string(theta[1])+"-"+std::to_string(theta[2])+"-"+std::to_string(theta[3])+"-"+std::to_string(theta[4])+"-"+std::to_string(theta[5])+"-"+ std::to_string(M) + "-"+std::to_string(tol_print)+".svg";
+        //T->plotTree(path);
+        //T->printTreeDetails();
         end = omp_get_wtime();
         std::cout << "Time for making cov mat in HODLR form: " << (end - start) << std::endl;
+        results.time_per_iteration +=(end - start);
+        results.time_per_generation +=(end - start);
+
+        //Factorization 
         start = omp_get_wtime();
         Eigen::LLT<Mat> llt;
         T->factorize();
         end = omp_get_wtime();
+        std::cout << "Time for making cov mat in HODLR form: " << (end - start) << std::endl;
+        results.time_per_iteration +=(end - start);
+        results.time_per_factorization +=(end - start);
+
+        //Solver
+        start = omp_get_wtime();
         Vec x = T->solve(z);
+        end = omp_get_wtime();
+        std::cout << "Time for solver trsm in HODLR form: " << (end - start) << std::endl;
+        results.time_per_iteration +=(end - start);
+        results.time_per_solver +=(end - start);
         for(i=0;i<N;i++)
             z_temp[i] = z[i];
         double dotp = z.adjoint()*x;
 
-
+        //exit(0);  to draw heatmap
         std::cout << "Time to factorize in HODLR: " << (end - start) << std::endl;
 
         start = omp_get_wtime();
         dtype log_det_hodlr = T->logDeterminant();
         end = omp_get_wtime();
         std::cout << "Time for logdet in HODLR: " << (end - start) << std::endl;
-
+        results.time_per_iteration +=(end - start);
         double loglik = -0.5 * dotp -  0.5*log_det_hodlr;
 
         loglik = loglik - core_ng_loglike (z_temp, theta, N) - N * log(theta[3]) - (double) ( N / 2.0) * log(2.0 * PI);
 
-        std::cout <<count++<<"- ("<<theta[0]<<", "<<theta[1]<<", "<< theta[2]<<", "<<theta[3]<<", "<< theta[4]<<", "<<theta[5]<<")---> LogLi = "<< std::setprecision(16) << loglik<<"\n";
-
+        std::cout <<iters++<<"- ("<<theta[0]<<", "<<theta[1]<<", "<< theta[2]<<", "<<theta[3]<<", "<< theta[4]<<", "<<theta[5]<<")---> LogLi = "<< std::setprecision(16) << loglik<<"\n";
+        count++;
         std::cout << " ---- dotp: " << std::setprecision(16) <<dotp << std::endl;
         std::cout << " ---- logdet: " << std::setprecision(16)  << log_det_hodlr << std::endl;
         std::cout << " ---- core_ng_loglike: " <<std::setprecision(16) << core_ng_loglike (z_temp, theta, N) << std::endl;
         //std::cout << "logtheta:" <<std::setprecision(16) << N * log(theta[3]) << std::endl;
         std::cout << " ---- loglik: " << std::setprecision(16) <<loglik << std::endl;
         std::cout << "========================================================= "<< std::endl;
+        results.final_loglik = loglik;
+        for(int i=0;i<6;i++)
+            results.estimated_theta[i] = theta[i];
         return loglik;
     }
 }
@@ -741,6 +777,16 @@ int main(int argc, char* argv[])
 
     double *starting_theta  = (double *) malloc(num_params * sizeof(double));
     double *initial_theta   = (double *) malloc(num_params * sizeof(double));
+    results.estimated_theta  = (double *) malloc(num_params * sizeof(double));
+    results.initial_theta   = (double *) malloc(num_params * sizeof(double));
+
+    results.final_loglik = 0;
+    results.time_per_generation = 0;
+    results.time_per_factorization = 0;
+    results.time_per_solver = 0;
+    results.time_per_iteration = 0;
+
+
     double* lb = (double *) malloc(num_params * sizeof(double));
     double* ub = (double *) malloc(num_params * sizeof(double));
 
@@ -758,10 +804,13 @@ int main(int argc, char* argv[])
         lb[i]               = atof(argv[i+5]);
         ub[i]               = atof(argv[i+11]);
         initial_theta[i]    = atof(argv[i+17]);
+        results.initial_theta[i] = initial_theta[i];
         starting_theta[i]   = lb[i];
         //        std::cout <<lb[i]<<"  "<<ub[i]<<"  "<<initial_theta[i]<<std::endl;
     }
-
+    int seed =  atoi(argv[23]);
+    int opt_iters =  atoi(argv[24]);    
+    data.seed= seed;
     starting_theta[4]=0.2;
     starting_theta[5]=0.2;
 
@@ -775,7 +824,9 @@ int main(int argc, char* argv[])
     std::cout << "========================= Problem Parameters =========================" << std::endl;
     std::cout << "Matrix Size                        :" << data.N << std::endl;
     std::cout << "Leaf Size                          :" << data.nLeaf << std::endl;
-    std::cout << "Tolerance                          :" << data.tol << std::endl << std::endl;
+    std::cout << "HODLR Tolerance                    :" << data.tol << std::endl;
+    std::cout << "Seed(z_sample)                     :" << data.seed << std::endl;
+    std::cout << "Opt. Iterations                    :" << opt_iters << std::endl << std::endl;
 
     //Generate new dataset
     std::cout << "Synthetic data generatation in dense format... "<<std::endl;
@@ -785,12 +836,46 @@ int main(int argc, char* argv[])
     double end = omp_get_wtime();
     std::cout << "Time : " << (end - start) << std::endl;
 
+    //    starting_theta[0]=0.96;  starting_theta[1]=0.5;  starting_theta[2]=0;  starting_theta[3]=2;  starting_theta[4]=0.5;  starting_theta[5]=0.3;
+
     opt=nlopt_create(NLOPT_LN_BOBYQA, num_params);
     init_optimizer(&opt, lb, ub, opt_tol);
-    nlopt_set_maxeval(opt, 2000);
+    nlopt_set_maxeval(opt, opt_iters);
 
     nlopt_set_max_objective(opt, MLE_ng_HODLR_alg, &data);
     nlopt_optimize(opt, starting_theta, &opt_f);
+    //****************
+    FILE *pFile;
+    char * nFileZ  = (char *) malloc(50 * sizeof(char));
+
+
+    snprintf(nFileZ, 50, "%s%f%s%f%s%f%s", "./results_hodlr_", initial_theta[0],"_",  initial_theta[4],"_", initial_theta[5],".log");
+
+    pFile = fopen(nFileZ, "a");
+
+    if(pFile == NULL) {
+        printf("Cannot access the results path(3)\n");
+        return -1;
+    }
+
+    fprintf(pFile, "%d ", data.N);
+    fprintf(pFile, "%d ", data.nLeaf);
+    fprintf(pFile, "%f ", data.tol);
+    fprintf(pFile, "%d ", seed);   //z_sample
+
+    for(int i=0; i<6; i++)
+        fprintf(pFile, "%6.6f ", results.initial_theta[i]);
+    for(int i=0; i<6; i++)
+        fprintf(pFile, "%6.6f ", results.estimated_theta[i]);
+
+    fprintf(pFile, "%6.6f ", results.final_loglik);
+    fprintf(pFile, "%d ", iters);
+    fprintf(pFile, "%6.6f ", results.time_per_generation/count);
+    fprintf(pFile, "%6.6f ", results.time_per_factorization/count);
+    fprintf(pFile, "%6.6f ", results.time_per_solver/count);
+    fprintf(pFile, "%6.6f\n", results.time_per_iteration/count);
+
+    fclose(pFile);
 }
 
 /*int main(int argc, char* argv[]) 
