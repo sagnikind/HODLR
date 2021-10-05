@@ -673,6 +673,7 @@ double MLE_ng_HODLR(double *z_0, const double *theta, int N, int M, double tol)
         results.final_loglik = loglik;
         for(int i=0;i<6;i++)
             results.estimated_theta[i] = theta[i];
+        delete T;
         return loglik;
     }
 }
